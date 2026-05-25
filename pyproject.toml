@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bugbot"
+version = "0.1.0"
+description = "BUG Trading Bot: escáner de señales y (opcional) publicación a Telegram."
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Si quieres administrar deps aquí, puedes añadirlas:
+# dependencies = ["ccxt", "pandas", "numpy", "python-dotenv"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Atajos de línea de comando (opcionales y útiles)
+[project.scripts]
+bugbot-scan = "bugbot.cli.scan_console:main"  # escáner por consola (usa tu .env)
+bugbot-ping = "bugbot.cli.ping_exchange:main"  # prueba OHLCV + EMAs
+bugbot-list = "bugbot.cli.list_symbols:main"    # lista símbolos del exchange activo
+bugbot-run  = "bugbot.cli.run_bot:main"
+bugbot-analyze = "bugbot.cli.analyze_now:main"

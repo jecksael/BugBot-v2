@@ -1,0 +1,122 @@
+rules:
+  threshold: 80   # total mínimo para disparar señal
+
+  long:
+    - check: weekly_bias
+      weight: 20
+      params:
+        band: 0.05
+        tilt_ok: 0.995
+        fast: 21
+        slow: 52
+
+    - check: trend_4h
+      weight: 20
+      params:
+        fast: 21
+        slow: 52
+
+    - check: ema_cross_1h
+      weight: 20
+      params:
+        fast: 21
+        slow: 52
+
+    - check: ema_fractal_1h
+      weight: 15
+      params:
+        fast: 21
+        slow: 52
+        lookback: 5
+        require_fractal: true
+
+    - check: confirm_15m_align
+      weight: 15
+      params:
+        fast: 21
+        slow: 52
+        bars: 3
+
+    # Nuevos filtros
+    - check: atr_filter
+      weight: 10
+      params:
+        min_pct: 0.35      # ATR mínimo (0.5% del precio)
+        max_pct: 3.5      # ATR máximo (3% del precio)
+
+    - check: near_cross_gap
+      weight: 10
+      params:
+        max_gap_pct: 0.35 # gap entre EMA21/52 < 0.25%
+
+    - check: volume_boost
+      weight: 08
+      params:
+        sma_period: 20    # volumen actual > SMA20 volumen
+
+    - check: htf_bias
+      weight: 10
+      params:
+        tf: 4h            # bias se toma de 4H
+        fast: 21
+        slow: 52
+
+  short:
+    - check: weekly_bias
+      weight: 20
+      params:
+        band: 0.05
+        tilt_ok: 1.005
+        fast: 21
+        slow: 52
+
+    - check: trend_4h
+      weight: 20
+      params:
+        fast: 21
+        slow: 52
+
+    - check: ema_cross_1h
+      weight: 20
+      params:
+        fast: 21
+        slow: 52
+
+    - check: ema_fractal_1h
+      weight: 15
+      params:
+        fast: 21
+        slow: 52
+        lookback: 5
+        require_fractal: true
+
+    - check: confirm_15m_align
+      weight: 15
+      params:
+        fast: 21
+        slow: 52
+        bars: 3
+
+    # Nuevos filtros
+    - check: atr_filter
+      weight: 10
+      params:
+        min_pct: 0.35  # antes 0.5
+        max_pct: 3.5   # antes 3.0
+
+    - check: near_cross_gap
+      weight: 10
+      params:
+        max_gap_pct: 0.35  # antes 0.25
+
+    - check: volume_boost
+      weight: 08
+      params:
+        sma_period: 20
+
+    - check: htf_bias
+      weight: 10
+      params:
+        tf: 4h
+        fast: 21
+        slow: 52
