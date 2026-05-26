@@ -1,7 +1,8 @@
 from src.bugbot.core.risk import calculate_contracts
 
+# Test MNQ cuenta $50K
 r = calculate_contracts(
-    symbol='NQ',
+    symbol='MNQ',
     account_size=50_000,
     entry=21000,
     stop=20987.5,

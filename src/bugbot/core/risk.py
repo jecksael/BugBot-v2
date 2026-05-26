@@ -15,6 +15,12 @@ CONTRACT_SPECS = {
         "point_value": 20.00,
         "default_risk": 250,
     },
+    "MNQ": {
+        "tick_size":    0.25,
+        "tick_value":   0.50,
+        "point_value":  2.00,
+        "default_risk": 250,
+    },
     "MES": {
         "tick_size":    0.25,
         "tick_value":   1.25,
@@ -35,15 +41,15 @@ APEX_RULES = {
         "daily_loss_limit":    1_000,
         "trailing_drawdown":   2_500,
         "profit_target":       3_000,
-        "max_contracts": {"NQ": 3, "MES": 10, "MGC": 5},
-        "default_stop_points": {"NQ": 12.5, "MES": 6, "MGC": 15},
+        "max_contracts": {"NQ": 3, "MES": 10, "MGC": 5, "MNQ": 10},
+        "default_stop_points": {"NQ": 12.5, "MES": 6, "MGC": 15, "MNQ": 12.5},
     },
     100_000: {
         "daily_loss_limit":    2_000,
         "trailing_drawdown":   4_500,
         "profit_target":       6_000,
-        "max_contracts": {"NQ": 6, "MES": 15, "MGC": 10},
-        "default_stop_points": {"NQ": 12.5, "MES": 6, "MGC": 15},
+        "max_contracts": {"NQ": 6, "MES": 15, "MGC": 10,"MNQ": 15},
+        "default_stop_points": {"NQ": 12.5, "MES": 6, "MGC": 15, "MNQ": 12.5},
     },
 }
 
