@@ -1,82 +1,62 @@
+# src/bugbot/core/engine.py
+"""
+BugBot v2.0 — Engine principal para MNQ/MES/MGC
+"""
 from __future__ import annotations
 from datetime import datetime, timezone
-from . import formatting as fmt
-from .indicators import add_ema
-from .strategy import ema_fractal_signal
+
+from ..adapters.data import fetch_ohlcv
 from ..config.settings import get_settings
-from ..adapters.exchange import ExchangeRouter
-
-def _build_tps_sl(
-    entry: float,
-    side: str,
-    tp_pcts: list[float],
-    sl_pct: float,
-    *,
-    sl_hint: float | None = None,
-):
-    mult = 1 if side == "LONG" else -1
-    tps = [entry * (1 + mult*p) for p in tp_pcts]
-    if sl_hint is not None:
-        sl = float(sl_hint)
-        if side == "LONG":
-            sl = min(sl, entry)
-        else:
-            sl = max(sl, entry)
-        return tps, sl, "fractal"
-
-    sl  = entry * (1 - mult*sl_pct)
-    return tps, sl, "percent"
+from ..core.risk import calculate_contracts
+from ..core.strategy_v2 import detect_signal, add_emas, add_vwap, add_volume_sma
+from ..core.formatting_v2 import fmt_signal, fmt_no_signal
 
 def analyze() -> list[dict]:
     s = get_settings()
-    router = ExchangeRouter.from_env()
-
     signals = []
-    used_exchange = None
 
     for symbol in s.symbols:
-        ex_id, df = router.fetch_ohlcv_df(symbol, timeframe=s.timeframe, limit=200)
-        used_exchange = ex_id  # último exitoso (para nota)
-        df = add_ema(add_ema(df, s.ema_fast), s.ema_slow)
-        sig = ema_fractal_signal(
-            df,
-            s.ema_fast,
-            s.ema_slow,
-            lookback=s.fractal_lookback,
-            require_fractal=s.use_fractal_filter,
-        )
-        if not sig:
-            continue
+        try:
+            # 1. Obtener datos
+            df = fetch_ohlcv(symbol, timeframe=s.timeframe, bars=200)
 
-        tps, sl, sl_source = _build_tps_sl(
-            sig["entry"],
-            sig["side"],
-            s.tp_pcts,
-            s.sl_pct,
-            sl_hint=sig.get("sl_hint"),
-        )
+            # 2. Agregar indicadores
+            df = add_emas(df)
+            df = add_vwap(df)
+            df = add_volume_sma(df)
 
-        signals.append({
-            "symbol": symbol,
-            "tf": s.timeframe,
-            "side": sig["side"],
-            "entry_lo": sig["entry"],
-            "entry_hi": sig["entry"],
-            "sl": sl,
-            "tps": tps,
-            "sl_source": sl_source,
-            "fractals": sig.get("fractals"),
-            "risk_pct": sig.get("risk_pct"),
-        })
+            # 3. Detectar señal
+            signal = detect_signal(df)
 
-    if not signals:
-        # sin señales -> devolvemos lista vacía (el ciclo mandará BOT iniciado + finalizado 0 alertas)
-        return []
+            if not signal:
+                continue
 
-    note = f"Fuente: {used_exchange} (failover activo)" if used_exchange else None
-    html = fmt.signals_digest_html(signals, note=note, ts=datetime.now(timezone.utc))
-    return [{
-        "text": html,
-        "parse_mode": "HTML",
-        "signals_count": len(signals),
-    }]
+            # 4. Calcular riesgo
+            risk = calculate_contracts(
+                symbol=symbol,
+                account_size=s.account_size,
+                entry=signal["entry"],
+                stop=signal["sl"],
+                side=signal["side"],
+            )
+
+            if not risk.viable:
+                continue
+
+            # 5. Formatear mensaje
+            text = fmt_signal(symbol, signal, risk)
+
+            signals.append({
+                "text":          text,
+                "parse_mode":    "HTML",
+                "signals_count": 1,
+            })
+
+        except Exception as e:
+            signals.append({
+                "text":          f"⚠️ Error en {symbol}: {e}",
+                "parse_mode":    None,
+                "signals_count": 0,
+            })
+
+    return signals
