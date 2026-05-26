@@ -10,6 +10,7 @@ import yfinance as yf
 # Mapeo de símbolos BugBot → yfinance
 SYMBOL_MAP = {
     "NQ":  "NQ=F",
+    "MNQ": "MNQ=F",
     "MES": "MES=F",
     "MGC": "MGC=F",
 }
