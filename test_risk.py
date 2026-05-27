@@ -1,23 +1,22 @@
-from src.bugbot.core.risk import calculate_contracts
+from src.bugbot.adapters.data import fetch_ohlcv
+from src.bugbot.core.risk import calculate_contracts_dynamic, calc_atr
 
-tests = [
-    {"symbol": "MNQ", "entry": 21000, "stop": 20975},  # 25 puntos stop
-    {"symbol": "MES", "entry": 5300,  "stop": 5287.5}, # 12.5 puntos stop
-    {"symbol": "MGC", "entry": 2350,  "stop": 2335},   # 15 puntos stop
-]
+for sym in ["MNQ", "MES", "MGC"]:
+    df = fetch_ohlcv(sym, "5m")
+    atr = calc_atr(df)
+    print(f"\n=== {sym} ===")
+    print(f"ATR actual: {atr} puntos")
 
-for t in tests:
-    r = calculate_contracts(
-        symbol=t["symbol"],
+    r = calculate_contracts_dynamic(
+        symbol=sym,
         account_size=50_000,
-        entry=t["entry"],
-        stop=t["stop"],
-        side='LONG'
+        entry=float(df["close"].iloc[-1]),
+        side="LONG",
+        df=df,
     )
-    print(f"\n=== {r.symbol} ===")
-    print(f"Contratos: {r.contracts}")
-    print(f"Riesgo:    ${r.risk_dollars}")
-    print(f"Stop pts:  {r.stop_points}")
+    print(f"Contratos:  {r.contracts}")
+    print(f"SL:         {r.stop} ({r.stop_points} pts)")
+    print(f"Riesgo:     ${r.risk_dollars}")
     for tp in r.tp_levels:
         print(f"{tp.name} → {tp.price} | {tp.contracts} contratos | ${tp.profit_usd}")
     print(f"Viable: {r.viable}")
