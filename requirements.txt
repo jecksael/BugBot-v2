@@ -1,12 +1,36 @@
-# Runtime
-python-telegram-bot==21.6
-python-dotenv==1.0.1
-requests==2.32.3
-APScheduler==3.10.4
-tzdata==2024.1     # útil en Windows
-
-# Dev
-pytest==8.3.2
-black==24.8.0
-ruff==0.6.9
-pre-commit==3.8.0
+anyio==4.13.0
+APScheduler==3.11.2
+beautifulsoup4==4.14.3
+-e git+https://github.com/jecksael/BugBot-v2.git@754bfcd9b675fc9e7870b2f6c0e0899b94dd4321#egg=bugbot
+certifi==2026.5.20
+cffi==2.0.0
+charset-normalizer==3.4.7
+curl_cffi==0.15.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.16
+markdown-it-py==4.2.0
+mdurl==0.1.2
+multitasking==0.0.13
+numpy==2.4.6
+pandas==3.0.3
+peewee==4.0.6
+platformdirs==4.9.6
+protobuf==7.35.0
+pycparser==3.0
+Pygments==2.20.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-telegram-bot==22.7
+pytz==2026.2
+requests==2.34.2
+rich==15.0.0
+six==1.17.0
+soupsieve==2.8.4
+typing_extensions==4.15.0
+tzdata==2026.2
+tzlocal==5.3.1
+urllib3==2.7.0
+websockets==16.0
+yfinance==1.4.0
