@@ -36,37 +36,21 @@ async def _run_cycle(context: ContextTypes.DEFAULT_TYPE) -> None:
     started = time.monotonic()
 
     try:
-        await context.bot.send_message(
-            chat_id=s.chat_id,
-            text=fmt_cycle_start(),
-            parse_mode="HTML",
-            message_thread_id=s.thread_id if s.thread_id else None,
-        )
-
         signals = analyze()
-        total   = 0
+        total   = sum(msg.get("signals_count", 0) for msg in signals)
 
-        for msg in signals:
-            await context.bot.send_message(
-                chat_id=s.chat_id,
-                text=msg["text"],
-                parse_mode=msg.get("parse_mode"),
-                message_thread_id=s.thread_id if s.thread_id else None,
-            )
-            total += msg.get("signals_count", 0)
-
-        duration = int(time.monotonic() - started)
-
-        await context.bot.send_message(
-            chat_id=s.chat_id,
-            text=fmt_cycle_end(total, duration),
-            parse_mode="HTML",
-            message_thread_id=s.thread_id if s.thread_id else None,
-        )
+        # Solo mandar mensajes si hay señales
+        if total > 0:
+            for msg in signals:
+                await context.bot.send_message(
+                    chat_id=s.chat_id,
+                    text=msg["text"],
+                    parse_mode=msg.get("parse_mode"),
+                    message_thread_id=s.thread_id if s.thread_id else None,
+                )
 
     finally:
         BUSY = False
-
 async def cycle_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await _run_cycle(context)
 

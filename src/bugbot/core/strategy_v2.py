@@ -7,6 +7,47 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 
+from datetime import datetime, timezone
+import pytz
+
+# ─── Filtro de sesiones ───────────────────────────────────────────────────────
+
+SESSIONS = {
+    "NY": {
+        "symbols": ["MNQ", "MES"],
+        "tz":      "America/Denver",
+        "start":   8,   # 8:00 AM Denver
+        "end":     11,  # 11:00 AM Denver
+    },
+    "NY_AFTERNOON": {
+        "symbols": ["MNQ", "MES"],
+        "tz":      "America/Denver",
+        "start":   13,  # 1:00 PM Denver
+        "end":     15,  # 3:00 PM Denver
+    },
+    "ASIA": {
+        "symbols": ["MGC"],
+        "tz":      "America/Denver",
+        "start":   19,  # 7:00 PM Denver
+        "end":     23,  # 11:00 PM Denver
+    },
+}
+
+def is_session_active(symbol: str) -> bool:
+    """
+    Verifica si el símbolo está en horario de sesión activa.
+    """
+    now_utc = datetime.now(timezone.utc)
+
+    for session_name, cfg in SESSIONS.items():
+        if symbol.upper() not in cfg["symbols"]:
+            continue
+        tz   = pytz.timezone(cfg["tz"])
+        now  = now_utc.astimezone(tz)
+        hour = now.hour
+        if cfg["start"] <= hour < cfg["end"]:
+            return True
+    return False
 # ─── Indicadores ──────────────────────────────────────────────────────────────
 
 def add_emas(df: pd.DataFrame) -> pd.DataFrame:
@@ -72,6 +113,10 @@ def detect_signal(df: pd.DataFrame) -> dict | None:
       - Vela de rechazo bajista (close < open)
     """
     if len(df) < 50:
+        return None
+        # Verificar sesión activa
+    symbol = df.attrs.get("symbol", "")    
+    if symbol and not is_session_active(symbol):
         return None
 
     df = add_emas(df)

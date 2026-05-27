@@ -19,6 +19,7 @@ def analyze() -> list[dict]:
         try:
             # 1. Obtener datos
             df = fetch_ohlcv(symbol, timeframe=s.timeframe, bars=200)
+            df.attrs["symbol"] = symbol  # ← agregar esta línea
 
             # 2. Agregar indicadores
             df = add_emas(df)
