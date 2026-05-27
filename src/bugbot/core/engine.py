@@ -4,7 +4,7 @@ BugBot v2.0 — Engine principal para MNQ/MES/MGC
 """
 from __future__ import annotations
 from datetime import datetime, timezone
-
+from ..core.journal import log_signal
 from ..adapters.data import fetch_ohlcv
 from ..config.settings import get_settings
 from ..core.risk import calculate_contracts
@@ -44,7 +44,22 @@ def analyze() -> list[dict]:
             if not risk.viable:
                 continue
 
-            # 5. Formatear mensaje
+            # 5. Registrar en journal
+            log_signal(
+                symbol   = symbol,
+                side     = signal["side"],
+                entry    = signal["entry"],
+                sl       = signal["sl"],
+                tp1      = risk.tp_levels[0].price,
+                tp2      = risk.tp_levels[1].price,
+                tp3      = risk.tp_levels[2].price,
+                risk_usd = risk.risk_dollars,
+                zona     = signal["zona"],
+                bias     = signal["bias"],
+                session  = "NY" if symbol in ["MNQ", "MES"] else "ASIA",
+            )
+
+            # 6. Formatear mensaje
             text = fmt_signal(symbol, signal, risk)
 
             signals.append({
