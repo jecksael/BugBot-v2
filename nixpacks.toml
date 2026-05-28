@@ -1,2 +1,5 @@
+[phases.setup]
+nixPkgs = ["git"]
+
 [start]
 cmd = "python -m src.bugbot.cli.run_bot"
