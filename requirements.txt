@@ -1,7 +1,7 @@
 anyio==4.13.0
 APScheduler==3.11.2
 beautifulsoup4==4.14.3
--e git+https://github.com/jecksael/BugBot-v2.git@754bfcd9b675fc9e7870b2f6c0e0899b94dd4321#egg=bugbot
+-e.
 certifi==2026.5.20
 cffi==2.0.0
 charset-normalizer==3.4.7
