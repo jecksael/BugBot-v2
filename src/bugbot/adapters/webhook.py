@@ -28,7 +28,7 @@ from fastapi import FastAPI, Request, HTTPException
 
 from ..config.settings import get_settings
 from ..config.logging import setup_logging
-from ..core.risk import calculate_contracts
+from ..core.risk import calculate_contracts, CONTRACT_SPECS
 from ..core.journal import log_signal
 from ..core.formatting_v2 import fmt_signal
 from ..adapters.telegram import send_text
@@ -75,7 +75,14 @@ async def tradingview_webhook(request: Request):
         symbol = str(payload["symbol"]).upper().strip()
         side   = str(payload["side"]).upper().strip()
         entry  = float(payload["entry"])
-        sl     = float(payload["sl"])
+        # SL opcional: si no viene o es igual al entry (ej. {{close}}),
+        # lo calcula el bot con el default_stop del símbolo.
+        raw_sl = payload.get("sl")
+        if raw_sl is None or float(raw_sl) == entry:
+            stop_pts = CONTRACT_SPECS[symbol]["default_stop"]
+            sl = entry - stop_pts if side == "LONG" else entry + stop_pts
+        else:
+            sl = float(raw_sl)
     except (KeyError, ValueError, TypeError) as e:
         log.warning("payload incompleto/ inválido: %s | %s", payload, e)
         raise HTTPException(status_code=422, detail=f"campos faltantes o inválidos: {e}")
