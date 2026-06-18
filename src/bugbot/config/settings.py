@@ -66,17 +66,17 @@ def get_settings() -> Settings:
         timezone                 = os.getenv("TIMEZONE", "America/Denver"),
         polling_interval_seconds = int(os.getenv("POLLING_INTERVAL_SECONDS", "60")),
 
-        symbols                  = _csv(os.getenv("SYMBOLS") or "NQ,MES"),
+        symbols                  = _csv(os.getenv("SYMBOLS") or "MNQ,MES,MGC"),
         timeframe                = os.getenv("TIMEFRAME", "5m"),
 
         ema_fast                 = int(os.getenv("EMA_FAST", "21")),
-        ema_slow                 = int(os.getenv("EMA_SLOW", "52")),
+        ema_slow                 = int(os.getenv("EMA_SLOW", "50")),
 
         account_size             = float(os.getenv("ACCOUNT_SIZE", "50000")),
         risk_pct                 = float(os.getenv("RISK_PCT", "0.006")),
         default_stop_points      = float(os.getenv("DEFAULT_STOP_POINTS", "15")),
         apex_account             = float(os.getenv("APEX_ACCOUNT", "50000")),
 
-        data_source              = os.getenv("DATA_SOURCE", "csv"),
+        data_source              = os.getenv("DATA_SOURCE", "yfinance"),
         csv_path                 = os.getenv("CSV_PATH", "data/"),
     )
