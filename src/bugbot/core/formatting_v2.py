@@ -4,7 +4,7 @@ BugBot v2.0 — Formato de alertas Telegram para MNQ/MES/MGC
 """
 from __future__ import annotations
 from datetime import datetime, timezone
-
+from zoneinfo import ZoneInfo
 SIDE_EMOJI = {"LONG": "🟩", "SHORT": "🟥"}
 CONTRACT_EMOJI = {"MNQ": "📊", "MES": "📈", "MGC": "🥇"}
 
@@ -18,7 +18,7 @@ def fmt_signal(
     sl       = signal["sl"]
     zona     = signal["zona"]
     bias     = signal["bias"]
-    now      = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    now      = datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET")
     emoji    = SIDE_EMOJI.get(side, "⬜")
     c_emoji  = CONTRACT_EMOJI.get(symbol, "📊")
 
@@ -51,18 +51,18 @@ def fmt_signal(
     )
 
 def fmt_no_signal(symbol: str) -> str:
-    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    now = datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET")
     return (
         f"😴 <b>{symbol}</b> — Sin señal\n"
         f"🕒 <i>{now}</i>"
     )
 
 def fmt_cycle_start() -> str:
-    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    now = datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET")
     return f"🟢 <b>BugBot v2.0 iniciado</b> — 🕒 <i>{now}</i>"
 
 def fmt_cycle_end(n_signals: int, duration: int) -> str:
-    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    now = datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET")
     return (
         f"🟣 <b>Ciclo finalizado</b> "
         f"| 🔔 {n_signals} señales "
