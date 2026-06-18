@@ -176,8 +176,9 @@ APEX_RULES = {
 # ─── Distribución de salidas ──────────────────────────────────────────────────
 EXIT_PLANS = {
     "MNQ": [
-        {"name": "TP1", "r_multiple": 1, "contracts": 2},  # 2 contratos en 1R
-        {"name": "TP3", "r_multiple": 4, "contracts": 2},  # 2 contratos en 4R
+        {"name": "TP1", "r_multiple": 1, "contracts": 2},
+        {"name": "TP2", "r_multiple": 2, "contracts": 1},
+        {"name": "TP3", "r_multiple": 4, "contracts": 1},
     ],
     "MES": [
         {"name": "TP1", "r_multiple": 1, "contracts": 1},  # 1 contrato en 1R

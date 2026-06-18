@@ -24,12 +24,14 @@ def fmt_signal(
 
     # TPs
     tp_lines = ""
+    total_contracts = sum(tp.contracts for tp in risk.tp_levels) or 1
     for tp in risk.tp_levels:
+        pct = tp.contracts / total_contracts
         tp_lines += (
             f"• <b>{tp.name}:</b> <code>{tp.price:,.2f}</code> "
-            f"| {int(tp.pct_exit*100)}% salida "
+            f"| {int(round(pct*100))}% salida "
             f"| <b>+${tp.profit_usd:,.0f}</b>\n"
-        )
+    )
 
     stop_pts = abs(entry - sl)
 
