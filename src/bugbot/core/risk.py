@@ -33,7 +33,7 @@ CONTRACT_SPECS = {
         "contracts":    1,
     },
 }
-# ─── SL dinámico con ATR ─────────────────────────────────────────────────────
+# ─── SL dinámico con ATR  ─────────────────────────────────────────────────────
 
 def calc_atr(df, period: int = 14) -> float:
     """
