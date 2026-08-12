@@ -185,7 +185,9 @@ EXIT_PLANS = {
         {"name": "TP3", "r_multiple": 4, "contracts": 1},  # 1 contrato en 4R
     ],
     "MGC": [
-        {"name": "TP2", "r_multiple": 2, "contracts": 1},  # 1 contrato en 2R
+        {"name": "TP1", "r_multiple": 1, "contracts": 1},  # 1R
+        {"name": "TP2", "r_multiple": 2, "contracts": 1},  # 2R
+        {"name": "TP3", "r_multiple": 3, "contracts": 1},  # 3R
     ],
 }
 
