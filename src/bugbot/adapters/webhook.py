@@ -32,6 +32,8 @@ from ..core.risk import (
     calculate_contracts,
     calculate_contracts_dynamic,
     CONTRACT_SPECS,
+    RiskResult,
+    TPLevel,
 )
 from ..adapters.data import fetch_ohlcv
 from ..core.journal import log_signal
@@ -102,37 +104,81 @@ async def tradingview_webhook(request: Request):
     zona = str(payload.get("zona", payload.get("event", "TV"))).upper()
     bias = str(payload.get("bias", side)).upper()
 
+    # Estrategia de origen: "SMC" (default) o "RTS". Define cómo se calculan
+    # el SL y los TP. Se muestra como etiqueta en Telegram.
+    strategy = str(payload.get("strategy", "SMC")).upper().strip()
+
     s = get_settings()
-    log.info("ALERT %s %s entry=%.2f zona=%s (SL/TP dinámico ATR)", symbol, side, entry, zona)
 
-    # 4a. Bajar velas para el ATR. Si yfinance falla, descartamos y avisamos.
-    try:
-        df = fetch_ohlcv(symbol, timeframe=ATR_TIMEFRAME, bars=ATR_BARS)
-    except Exception as e:
-        log.exception("no se pudieron bajar velas para ATR")
-        send_text(
-            f"⚠️ {symbol} {side} descartado — sin datos para ATR "
-            f"({ATR_TIMEFRAME}). Detalle: {e}"
+    if strategy == "RTS":
+        # ── RTS: usa SUS PROPIOS niveles del payload (no calcula ATR) ──
+        try:
+            sl  = float(payload["sl"])
+            tp1 = float(payload["tp1"])
+            tp2 = float(payload["tp2"])
+            tp3 = float(payload["tp3"])
+        except (KeyError, ValueError, TypeError) as e:
+            log.warning("RTS payload sin niveles completos: %s | %s", payload, e)
+            raise HTTPException(status_code=422, detail=f"RTS requiere sl/tp1/tp2/tp3: {e}")
+
+        log.info("ALERT RTS %s %s entry=%.2f (niveles propios)", symbol, side, entry)
+
+        spec        = CONTRACT_SPECS.get(symbol, {})
+        point_value = spec.get("point_value", 1.0)
+        contracts   = spec.get("contracts", 1)
+        stop_points = abs(entry - sl)
+
+        r_tp1 = abs(tp1 - entry) / stop_points if stop_points else 0.0
+        r_tp2 = abs(tp2 - entry) / stop_points if stop_points else 0.0
+        r_tp3 = abs(tp3 - entry) / stop_points if stop_points else 0.0
+
+        tps = [
+            TPLevel("TP1", round(tp1, 2), round(r_tp1, 1), contracts,
+                    round(contracts * stop_points * r_tp1 * point_value, 2)),
+            TPLevel("TP2", round(tp2, 2), round(r_tp2, 1), contracts,
+                    round(contracts * stop_points * r_tp2 * point_value, 2)),
+            TPLevel("TP3", round(tp3, 2), round(r_tp3, 1), contracts,
+                    round(contracts * stop_points * r_tp3 * point_value, 2)),
+        ]
+        risk = RiskResult(
+            symbol=symbol, account_size=s.account_size, side=side,
+            entry=entry, stop=sl, stop_points=round(stop_points, 2),
+            contracts=contracts, risk_dollars=round(contracts * stop_points * point_value, 2),
+            point_value=point_value, daily_loss_limit=0.0, max_contracts=contracts,
+            tp_levels=tps, breakeven_after="TP1", viable=True, reason="",
         )
-        return {"status": "skipped", "reason": f"sin datos ATR: {e}"}
+    else:
+        # ── SMC (default): calcula SL/TP dinámico con ATR ──
+        log.info("ALERT SMC %s %s entry=%.2f zona=%s (SL/TP dinámico ATR)", symbol, side, entry, zona)
 
-    # 4b. Risk Engine dinámico (SL y TP calculados desde el ATR)
-    try:
-        risk = calculate_contracts_dynamic(
-            symbol=symbol,
-            account_size=s.account_size,
-            entry=entry,
-            side=side,
-            df=df,
-            atr_period=ATR_PERIOD,
-            atr_mult=ATR_MULT,
-        )
-    except Exception as e:
-        log.exception("error en risk engine dinámico")
-        raise HTTPException(status_code=500, detail=f"risk engine: {e}")
+        # Bajar velas para el ATR. Si yfinance falla, descartamos y avisamos.
+        try:
+            df = fetch_ohlcv(symbol, timeframe=ATR_TIMEFRAME, bars=ATR_BARS)
+        except Exception as e:
+            log.exception("no se pudieron bajar velas para ATR")
+            send_text(
+                f"⚠️ {symbol} {side} descartado — sin datos para ATR "
+                f"({ATR_TIMEFRAME}). Detalle: {e}"
+            )
+            return {"status": "skipped", "reason": f"sin datos ATR: {e}"}
 
-    # El SL dinámico calculado por el ATR (para journal / telegram)
-    sl = risk.stop
+        # Risk Engine dinámico (SL y TP calculados desde el ATR)
+        try:
+            risk = calculate_contracts_dynamic(
+                symbol=symbol,
+                account_size=s.account_size,
+                entry=entry,
+                side=side,
+                df=df,
+                atr_period=ATR_PERIOD,
+                atr_mult=ATR_MULT,
+            )
+        except Exception as e:
+            log.exception("error en risk engine dinámico")
+            raise HTTPException(status_code=500, detail=f"risk engine: {e}")
+
+        # El SL dinámico calculado por el ATR (para journal / telegram)
+        sl = risk.stop
 
     if not risk.viable:
         log.info("%s | descartado por riesgo: %s", symbol, risk.reason)
@@ -144,6 +190,7 @@ async def tradingview_webhook(request: Request):
     sig = {
         "side": side, "entry": entry, "sl": sl,
         "zona": zona, "bias": bias, "event": zona,
+        "strategy": strategy,
     }
     # Acceso seguro a los TP: algunos símbolos (ej. MES) tienen menos de 3.
     _tp = [lvl.price for lvl in risk.tp_levels]
