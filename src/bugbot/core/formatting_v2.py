@@ -18,6 +18,7 @@ def fmt_signal(
     sl       = signal["sl"]
     zona     = signal["zona"]
     bias     = signal["bias"]
+    strategy = signal.get("strategy", "SMC")
     now      = datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET")
     emoji    = SIDE_EMOJI.get(side, "⬜")
     c_emoji  = CONTRACT_EMOJI.get(symbol, "📊")
@@ -38,6 +39,7 @@ def fmt_signal(
     return (
         f"{emoji} <b>{side} — {c_emoji} {symbol}</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
+        f"<b>📍 Estrategia:</b> {strategy}\n"
         f"<b>Bias:</b> {bias} ✅\n"
         f"<b>Zona:</b> {zona}\n"
         f"<b>Entry:</b> <code>{entry:,.2f}</code>\n"
