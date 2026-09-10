@@ -94,6 +94,27 @@ def update_result(
 
     return None
 
+def update_confluences(signal_id: int, confluences: list[str]) -> dict | None:
+    """
+    Agrega confluencias a una señal ya registrada (unión, nunca reemplazo).
+    Usado por el webhook cuando las confluencias se calculan en background
+    DESPUÉS de responderle a TradingView (para no arriesgar un timeout del
+    lado de TradingView por una descarga de velas lenta).
+    """
+    if not confluences:
+        return None
+    entries = _load()
+
+    for e in entries:
+        if e["id"] == signal_id:
+            existing = e.get("confluences") or []
+            merged = existing + [c for c in confluences if c not in existing]
+            e["confluences"] = merged
+            _save(entries)
+            return e
+
+    return None
+
 def get_stats() -> dict:
     """
     Calcula estadísticas del journal.

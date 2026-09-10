@@ -13,6 +13,14 @@ Flujo:
     → Risk Engine (calculate_contracts)
     → log_signal (journal)
     → send_text (Telegram)
+    → (background, DESPUÉS de responder) Confluencias → update_confluences
+
+IMPORTANTE — timeout de TradingView: TradingView espera la respuesta del
+webhook en una ventana muy corta (unos pocos segundos). Cualquier trabajo
+que dependa de una descarga de red (velas para Order Block/FVG) se hace
+DESPUÉS de responder 200 OK, vía BackgroundTasks — nunca antes. El SL/TP
+dinámico con ATR (rama SMC) sigue siendo síncrono porque es indispensable
+para la señal misma, no una mejora aditiva.
 
 Arranque (dev):
     uvicorn bugbot.adapters.webhook:app --host 0.0.0.0 --port 8000
@@ -24,7 +32,7 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 
 from ..config.settings import get_settings
 from ..config.logging import setup_logging
@@ -36,7 +44,7 @@ from ..core.risk import (
     TPLevel,
 )
 from ..adapters.data import fetch_ohlcv
-from ..core.journal import log_signal
+from ..core.journal import log_signal, update_confluences
 from ..core.confluences import compute_confluences_webhook
 from ..core.formatting_v2 import fmt_signal
 from ..adapters.telegram import send_text
@@ -67,8 +75,46 @@ def health():
     return {"status": "ok", "service": "bugbot-webhook"}
 
 
+def _finish_confluences(signal_id: int, symbol: str, zona: str, side: str, timeframe: str, df) -> None:
+    """
+    Corre DESPUÉS de responderle a TradingView (BackgroundTasks). Si `df`
+    ya vino calculado (rama SMC, reutiliza el mismo de ATR — cero llamadas
+    de red extra), lo usa directo; si no (rama RTS), lo baja acá, ya fuera
+    de la ventana de timeout de TradingView. Nunca puede afectar la señal
+    ya enviada — solo completa el journal y manda un mensaje aparte.
+    """
+    try:
+        if df is None:
+            df = fetch_ohlcv(symbol, timeframe=timeframe, bars=ATR_BARS)
+    except Exception:
+        log.exception("%s | no se pudieron bajar velas para confluencias en background (no crítico)", symbol)
+        df = None
+
+    try:
+        confluences = compute_confluences_webhook(zona, side, df, timeframe)
+    except Exception:
+        log.exception("%s | error calculando confluencias en background (no crítico)", symbol)
+        return
+
+    if not confluences:
+        return
+
+    try:
+        update_confluences(signal_id, confluences)
+    except Exception:
+        log.exception("%s | error guardando confluencias en journal (no crítico)", symbol)
+
+    try:
+        send_text(
+            f"🧩 <b>{symbol} {side}</b> — Confluencias: {', '.join(confluences)}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        log.exception("%s | error enviando mensaje de confluencias (no crítico)", symbol)
+
+
 @app.post("/webhook/tv")
-async def tradingview_webhook(request: Request):
+async def tradingview_webhook(request: Request, background_tasks: BackgroundTasks):
     # 1. Parsear JSON crudo (TradingView manda text/plain a veces)
     try:
         payload = await request.json()
@@ -111,9 +157,10 @@ async def tradingview_webhook(request: Request):
 
     s = get_settings()
 
-    # df_for_confluences: velas usadas para Order Block/FVG en Python. Se
-    # llenan si están disponibles; si no, las confluencias de precio quedan
-    # vacías pero la señal se manda igual (nunca bloquea nada).
+    # df_for_confluences: SOLO se llena si ya lo tenemos gratis (rama SMC,
+    # que baja velas igual para el ATR). Nunca se baja a propósito acá
+    # dentro del camino síncrono — eso quedó en _finish_confluences(),
+    # que corre después de responderle a TradingView.
     df_for_confluences = None
 
     if strategy == "RTS":
@@ -153,14 +200,6 @@ async def tradingview_webhook(request: Request):
             point_value=point_value, daily_loss_limit=0.0, max_contracts=contracts,
             tp_levels=tps, breakeven_after="TP1", viable=True, reason="",
         )
-
-        # RTS no trae velas por defecto — las bajamos aparte solo para poder
-        # calcular Order Block/FVG en Python. Si falla, seguimos sin ellas
-        # (nunca debe bloquear una señal RTS real).
-        try:
-            df_for_confluences = fetch_ohlcv(symbol, timeframe=ATR_TIMEFRAME, bars=ATR_BARS)
-        except Exception:
-            log.exception("%s | no se pudieron bajar velas para confluencias (RTS, no crítico)", symbol)
     else:
         # ── SMC (default): calcula SL/TP dinámico con ATR ──
         log.info("ALERT SMC %s %s entry=%.2f zona=%s (SL/TP dinámico ATR)", symbol, side, entry, zona)
@@ -193,6 +232,8 @@ async def tradingview_webhook(request: Request):
 
         # El SL dinámico calculado por el ATR (para journal / telegram)
         sl = risk.stop
+        # Ya tenemos las velas descargadas (las usó el ATR) — reutilizarlas
+        # para confluencias es gratis, no agrega ninguna llamada de red.
         df_for_confluences = df
 
     if not risk.viable:
@@ -201,39 +242,37 @@ async def tradingview_webhook(request: Request):
         send_text(f"⚠️ {symbol} {side} descartado — {risk.reason}")
         return {"status": "skipped", "reason": risk.reason}
 
-    # 4.5 Confluencias — NUNCA debe bloquear ni cambiar la señal real.
-    #     La estructura (BOS/CHoCH/Barrido) se lee del texto `zona` que vos
-    #     mismo escribiste en la alerta de TradingView; Order Block y FVG se
-    #     calculan en Python sobre las velas ya bajadas arriba.
-    try:
-        confluences = compute_confluences_webhook(zona, side, df_for_confluences, ATR_TIMEFRAME)
-    except Exception:
-        log.exception("%s | error calculando confluencias vía webhook (no crítico)", symbol)
-        confluences = []
-
-    # 5. Journal
+    # 5. Journal — SIN confluencias todavía (se completan en background).
     sig = {
         "side": side, "entry": entry, "sl": sl,
         "zona": zona, "bias": bias, "event": zona,
-        "strategy": strategy, "confluences": confluences,
+        "strategy": strategy,
     }
     # Acceso seguro a los TP: algunos símbolos (ej. MES) tienen menos de 3.
     _tp = [lvl.price for lvl in risk.tp_levels]
     tp1 = _tp[0] if len(_tp) > 0 else None
     tp2 = _tp[1] if len(_tp) > 1 else None
     tp3 = _tp[2] if len(_tp) > 2 else None
-    log_signal(
+    record = log_signal(
         symbol=symbol, side=side, entry=entry, sl=sl,
         tp1=tp1, tp2=tp2, tp3=tp3,
         risk_usd=risk.risk_dollars,
         zona=zona, bias=bias,
         session="TV",
-        confluences=confluences,
     )
 
-    # 6. Telegram
+    # 6. Telegram — se manda YA, sin esperar confluencias.
     text = fmt_signal(symbol, sig, risk)
     send_text(text, parse_mode="HTML")
-    log.info("%s | ✅ señal emitida vía webhook (confluencias: %s)", symbol, ", ".join(confluences) or "—")
+    log.info("%s | ✅ señal emitida vía webhook", symbol)
+
+    # 7. Confluencias en background — corre DESPUÉS de que FastAPI ya envió
+    #    la respuesta HTTP. Así el tiempo de respuesta a TradingView queda
+    #    igual que antes de este feature (nunca arriesga un timeout).
+    background_tasks.add_task(
+        _finish_confluences,
+        signal_id=record["id"], symbol=symbol, zona=zona, side=side,
+        timeframe=ATR_TIMEFRAME, df=df_for_confluences,
+    )
 
     return {"status": "ok", "symbol": symbol, "side": side}
