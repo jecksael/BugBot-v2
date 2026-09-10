@@ -33,6 +33,7 @@ import logging
 import os
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 
 from ..config.settings import get_settings
 from ..config.logging import setup_logging
@@ -48,11 +49,23 @@ from ..core.journal import log_signal, update_confluences
 from ..core.confluences import compute_confluences_webhook
 from ..core.formatting_v2 import fmt_signal
 from ..adapters.telegram import send_text
+from .ai_endpoints import router as ai_router
 
 setup_logging()
 log = logging.getLogger("bugbot.webhook")
 
 app = FastAPI(title="BugBot v2.0 Webhook", version="2.0")
+
+# CORS + endpoints de IA para prospeccion.html (redacción de mensajes +
+# autocompletar Lista de 100). No toca nada del flujo de TradingView de
+# acá abajo — ver src/bugbot/adapters/ai_endpoints.py.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+app.include_router(ai_router)
 
 # Token secreto compartido con TradingView. Va en el payload del alert,
 # NO en la URL (la URL puede quedar en logs/historial).
