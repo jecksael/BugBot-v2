@@ -34,31 +34,38 @@ def log_signal(
     zona:        str,
     bias:        str,
     session:     str = "",
+    confluences: list | None = None,
 ) -> dict:
     """
     Registra una señal nueva en el journal.
     Estado inicial: PENDING — tú lo actualizas después.
+
+    `confluences`: lista de etiquetas (mismos nombres que journal.html, ver
+    core/confluences.py) calculadas en el momento exacto de la señal — esto
+    es lo que después cruza el script puente contra journal.html para
+    completar Setup/Confluencias sin depender de leer capturas de pantalla.
     """
     entries = _load()
 
     record = {
-        "id":         len(entries) + 1,
-        "ts":         datetime.now(timezone.utc).isoformat(),
-        "symbol":     symbol,
-        "side":       side,
-        "entry":      entry,
-        "sl":         sl,
-        "tp1":        tp1,
-        "tp2":        tp2,
-        "tp3":        tp3,
-        "risk_usd":   risk_usd,
-        "zona":       zona,
-        "bias":       bias,
-        "session":    session,
-        "result":     "PENDING",  # WIN / LOSS / PENDING
-        "exit_price": None,
-        "pnl":        None,
-        "notes":      "",
+        "id":          len(entries) + 1,
+        "ts":          datetime.now(timezone.utc).isoformat(),
+        "symbol":      symbol,
+        "side":        side,
+        "entry":       entry,
+        "sl":          sl,
+        "tp1":         tp1,
+        "tp2":         tp2,
+        "tp3":         tp3,
+        "risk_usd":    risk_usd,
+        "zona":        zona,
+        "bias":        bias,
+        "session":     session,
+        "confluences": confluences or [],
+        "result":      "PENDING",  # WIN / LOSS / PENDING
+        "exit_price":  None,
+        "pnl":         None,
+        "notes":       "",
     }
 
     entries.append(record)

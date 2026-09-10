@@ -37,6 +37,7 @@ from ..core.risk import (
 )
 from ..adapters.data import fetch_ohlcv
 from ..core.journal import log_signal
+from ..core.confluences import compute_confluences_webhook
 from ..core.formatting_v2 import fmt_signal
 from ..adapters.telegram import send_text
 
@@ -110,6 +111,11 @@ async def tradingview_webhook(request: Request):
 
     s = get_settings()
 
+    # df_for_confluences: velas usadas para Order Block/FVG en Python. Se
+    # llenan si están disponibles; si no, las confluencias de precio quedan
+    # vacías pero la señal se manda igual (nunca bloquea nada).
+    df_for_confluences = None
+
     if strategy == "RTS":
         # ── RTS: usa SUS PROPIOS niveles del payload (no calcula ATR) ──
         try:
@@ -147,6 +153,14 @@ async def tradingview_webhook(request: Request):
             point_value=point_value, daily_loss_limit=0.0, max_contracts=contracts,
             tp_levels=tps, breakeven_after="TP1", viable=True, reason="",
         )
+
+        # RTS no trae velas por defecto — las bajamos aparte solo para poder
+        # calcular Order Block/FVG en Python. Si falla, seguimos sin ellas
+        # (nunca debe bloquear una señal RTS real).
+        try:
+            df_for_confluences = fetch_ohlcv(symbol, timeframe=ATR_TIMEFRAME, bars=ATR_BARS)
+        except Exception:
+            log.exception("%s | no se pudieron bajar velas para confluencias (RTS, no crítico)", symbol)
     else:
         # ── SMC (default): calcula SL/TP dinámico con ATR ──
         log.info("ALERT SMC %s %s entry=%.2f zona=%s (SL/TP dinámico ATR)", symbol, side, entry, zona)
@@ -179,6 +193,7 @@ async def tradingview_webhook(request: Request):
 
         # El SL dinámico calculado por el ATR (para journal / telegram)
         sl = risk.stop
+        df_for_confluences = df
 
     if not risk.viable:
         log.info("%s | descartado por riesgo: %s", symbol, risk.reason)
@@ -186,11 +201,21 @@ async def tradingview_webhook(request: Request):
         send_text(f"⚠️ {symbol} {side} descartado — {risk.reason}")
         return {"status": "skipped", "reason": risk.reason}
 
+    # 4.5 Confluencias — NUNCA debe bloquear ni cambiar la señal real.
+    #     La estructura (BOS/CHoCH/Barrido) se lee del texto `zona` que vos
+    #     mismo escribiste en la alerta de TradingView; Order Block y FVG se
+    #     calculan en Python sobre las velas ya bajadas arriba.
+    try:
+        confluences = compute_confluences_webhook(zona, side, df_for_confluences, ATR_TIMEFRAME)
+    except Exception:
+        log.exception("%s | error calculando confluencias vía webhook (no crítico)", symbol)
+        confluences = []
+
     # 5. Journal
     sig = {
         "side": side, "entry": entry, "sl": sl,
         "zona": zona, "bias": bias, "event": zona,
-        "strategy": strategy,
+        "strategy": strategy, "confluences": confluences,
     }
     # Acceso seguro a los TP: algunos símbolos (ej. MES) tienen menos de 3.
     _tp = [lvl.price for lvl in risk.tp_levels]
@@ -203,11 +228,12 @@ async def tradingview_webhook(request: Request):
         risk_usd=risk.risk_dollars,
         zona=zona, bias=bias,
         session="TV",
+        confluences=confluences,
     )
 
     # 6. Telegram
     text = fmt_signal(symbol, sig, risk)
     send_text(text, parse_mode="HTML")
-    log.info("%s | ✅ señal emitida vía webhook", symbol)
+    log.info("%s | ✅ señal emitida vía webhook (confluencias: %s)", symbol, ", ".join(confluences) or "—")
 
     return {"status": "ok", "symbol": symbol, "side": side}

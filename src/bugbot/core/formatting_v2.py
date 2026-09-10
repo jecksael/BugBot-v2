@@ -19,6 +19,7 @@ def fmt_signal(
     zona     = signal["zona"]
     bias     = signal["bias"]
     strategy = signal.get("strategy", "SMC")
+    confs    = signal.get("confluences") or []
     now      = datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET")
     emoji    = SIDE_EMOJI.get(side, "⬜")
     c_emoji  = CONTRACT_EMOJI.get(symbol, "📊")
@@ -35,6 +36,7 @@ def fmt_signal(
     )
 
     stop_pts = abs(entry - sl)
+    conf_line = f"<b>🧩 Confluencias:</b> {', '.join(confs)}\n" if confs else ""
 
     return (
         f"{emoji} <b>{side} — {c_emoji} {symbol}</b>\n"
@@ -42,6 +44,7 @@ def fmt_signal(
         f"<b>📍 Estrategia:</b> {strategy}\n"
         f"<b>Bias:</b> {bias} ✅\n"
         f"<b>Zona:</b> {zona}\n"
+        f"{conf_line}"
         f"<b>Entry:</b> <code>{entry:,.2f}</code>\n"
         f"<b>SL:</b> <code>{sl:,.2f}</code> ({stop_pts:.1f} pts)\n"
         f"<b>Riesgo:</b> ${risk.risk_dollars:,.0f}\n"

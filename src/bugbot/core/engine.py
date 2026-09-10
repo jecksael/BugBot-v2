@@ -14,6 +14,7 @@ from ..config.settings import get_settings
 from ..core.risk import calculate_contracts
 from ..core.strategy_smc import detect_signal
 from ..core.formatting_v2 import fmt_signal
+from ..core.confluences import compute_confluences
 
 log = logging.getLogger("bugbot.engine")
 
@@ -52,19 +53,28 @@ def analyze() -> list[dict]:
                 log.info("%s | descartado por riesgo: %s", symbol, risk.reason)
                 continue
 
+            # 3.5 Confluencias — NUNCA debe bloquear ni cambiar la señal real.
+            try:
+                confluences = compute_confluences(df, sig, symbol, s.timeframe)
+            except Exception:
+                log.exception("%s | error calculando confluencias (no crítico)", symbol)
+                confluences = []
+            sig["confluences"] = confluences
+
             # 4. Journal
             log_signal(
-                symbol   = symbol,
-                side     = sig["side"],
-                entry    = sig["entry"],
-                sl       = sig["sl"],
-                tp1      = risk.tp_levels[0].price,
-                tp2      = risk.tp_levels[1].price,
-                tp3      = risk.tp_levels[2].price,
-                risk_usd = risk.risk_dollars,
-                zona     = sig["zona"],
-                bias     = sig["bias"],
-                session  = sig.get("session") or ("NY" if symbol in ["MNQ", "MES"] else "ASIA"),
+                symbol      = symbol,
+                side        = sig["side"],
+                entry       = sig["entry"],
+                sl          = sig["sl"],
+                tp1         = risk.tp_levels[0].price,
+                tp2         = risk.tp_levels[1].price,
+                tp3         = risk.tp_levels[2].price,
+                risk_usd    = risk.risk_dollars,
+                zona        = sig["zona"],
+                bias        = sig["bias"],
+                session     = sig.get("session") or ("NY" if symbol in ["MNQ", "MES"] else "ASIA"),
+                confluences = confluences,
             )
 
             # 5. Mensaje
