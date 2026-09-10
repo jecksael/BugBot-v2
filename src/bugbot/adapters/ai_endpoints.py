@@ -140,10 +140,16 @@ async def call_llm(system: str, user: str, max_tokens: int = 500, temperature: f
 
 
 def _extract_json(text: str) -> dict:
-    """El modelo a veces envuelve el JSON en ```json ... ``` pese a la instrucción de no hacerlo."""
+    """El modelo a veces envuelve el JSON en ```json ... ``` pese a la instrucción de no hacerlo,
+    y en /calificar-l100 le pedimos a propósito un breve razonamiento ANTES del JSON (mejora la
+    calibración de las respuestas) — así que nos quedamos con el primer bloque {...} que aparezca,
+    en vez de asumir que toda la respuesta es JSON."""
     t = text.strip()
     t = re.sub(r"^```(json)?", "", t).strip()
     t = re.sub(r"```$", "", t).strip()
+    match = re.search(r"\{.*\}", t, re.S)
+    if match:
+        t = match.group(0)
     return json.loads(t)
 
 
@@ -276,8 +282,15 @@ CALIFICAR_SYSTEM = (
     "Social=false, U.S Resident=false, Bank Account=false, High Income=false, Business "
     "Mindset=true, People Skills=false, Coachable=false, Tech Savvy=false, Actively "
     "Looking=true, Dissatisfied=true, Open To New Streams=true, Investments=false, MLM=false.\n\n"
-    "Respondé ÚNICAMENTE con JSON válido, sin texto adicional, sin backticks, con exactamente "
-    "esta forma (reemplazando \"true/false\" por valores booleanos reales):\n" + _SCHEMA_EXAMPLE
+    "PASO OBLIGATORIO ANTES DE RESPONDER: escribí primero un análisis breve (máximo 8 líneas), "
+    "recorriendo las 16 afirmaciones UNA POR UNA, y para cada una anotá 'sí, porque el texto dice "
+    "...' o 'no, no hay evidencia' — esto te obliga a chequear cada afirmación contra el texto real "
+    "en vez de asumir un perfil genérico de buen prospecto. Se conservador: si estás listando "
+    "'sí' para más de la mitad de las 16, pará y revisá de nuevo — en una nota corta típica eso "
+    "casi seguro está mal.\n\n"
+    "Después de ese análisis, en una línea aparte, escribí ÚNICAMENTE el JSON final (sin backticks, "
+    "sin texto adicional después), con exactamente esta forma (reemplazando \"true/false\" por "
+    "valores booleanos reales):\n" + _SCHEMA_EXAMPLE
 )
 
 
@@ -288,7 +301,7 @@ async def calificar_l100(payload: dict, x_ai_token: str | None = Header(default=
     if not nota:
         raise HTTPException(status_code=422, detail="falta 'nota'")
 
-    texto = await call_llm(CALIFICAR_SYSTEM, nota, max_tokens=500, temperature=0.2)
+    texto = await call_llm(CALIFICAR_SYSTEM, nota, max_tokens=900, temperature=0.2)
     try:
         data = _extract_json(texto)
     except Exception:
