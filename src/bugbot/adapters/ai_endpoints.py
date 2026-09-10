@@ -55,31 +55,55 @@ def _check_token(x_ai_token: str | None) -> None:
         raise HTTPException(status_code=401, detail="token inválido")
 
 
+def _temperature_rejected(status: int, body: str) -> bool:
+    """Algunos modelos (ej. modelos de razonamiento más nuevos) rechazan el parámetro
+    `temperature` directamente ("`temperature` is deprecated for this model" en Anthropic).
+    Esto es un guard preventivo: si el proveedor lo rechaza por cualquier variante de este
+    motivo, reintentamos una vez sin mandar `temperature`, en vez de romper la función."""
+    if status not in (400, 422):
+        return False
+    return "temperature" in body.lower() and (
+        "deprecated" in body.lower() or "not supported" in body.lower() or "unsupported" in body.lower()
+    )
+
+
 async def call_llm(system: str, user: str, max_tokens: int = 500, temperature: float = 0.9) -> str:
     """Llama al proveedor configurado (AI_PROVIDER) y devuelve el texto plano de la respuesta.
 
     temperature: qué tan variada/creativa es la salida. Bajo (~0.2) para tareas de
     clasificación/extracción donde querés consistencia; alto (~0.9-1.0) para redacción
-    donde querés variedad entre llamadas sucesivas para el mismo prospecto.
+    donde querés variedad entre llamadas sucesivas para el mismo prospecto. Si el modelo
+    configurado no acepta este parámetro, se reintenta automáticamente sin él (ver
+    _temperature_rejected) — así el feature de variedad no rompe el resto del endpoint
+    si Anthropic/OpenAI cambian qué modelos aceptan `temperature`.
     """
     if AI_PROVIDER == "openai":
         if not OPENAI_API_KEY:
             raise HTTPException(status_code=500, detail="OPENAI_API_KEY no configurado")
         model = AI_MODEL or OPENAI_DEFAULT_MODEL
+        payload = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={
-                    "model": model,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                },
+                json=payload,
             )
+            if r.status_code >= 400 and _temperature_rejected(r.status_code, r.text):
+                log.warning("OpenAI rechazó 'temperature', reintentando sin ese parámetro")
+                payload.pop("temperature", None)
+                r = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    json=payload,
+                )
         if r.status_code >= 400:
             log.error("OpenAI error %s: %s", r.status_code, r.text[:500])
             raise HTTPException(status_code=502, detail=f"error de OpenAI: {r.text[:300]}")
@@ -90,22 +114,24 @@ async def call_llm(system: str, user: str, max_tokens: int = 500, temperature: f
     if not ANTHROPIC_API_KEY:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY no configurado")
     model = AI_MODEL or ANTHROPIC_DEFAULT_MODEL
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+    }
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": model,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "system": system,
-                "messages": [{"role": "user", "content": user}],
-            },
-        )
+        r = await client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+        if r.status_code >= 400 and _temperature_rejected(r.status_code, r.text):
+            log.warning("Anthropic rechazó 'temperature' para el modelo %s, reintentando sin ese parámetro", model)
+            payload.pop("temperature", None)
+            r = await client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
     if r.status_code >= 400:
         log.error("Anthropic error %s: %s", r.status_code, r.text[:500])
         raise HTTPException(status_code=502, detail=f"error de Anthropic: {r.text[:300]}")
