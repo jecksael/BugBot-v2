@@ -136,7 +136,16 @@ async def call_llm(system: str, user: str, max_tokens: int = 500, temperature: f
         log.error("Anthropic error %s: %s", r.status_code, r.text[:500])
         raise HTTPException(status_code=502, detail=f"error de Anthropic: {r.text[:300]}")
     data = r.json()
-    return data["content"][0]["text"]
+    # data["content"] es una LISTA de bloques, no siempre el primero es el texto: los modelos con
+    # razonamiento extendido devuelven bloques de tipo "thinking"/"redacted_thinking" ANTES del
+    # bloque de tipo "text" (esto es lo que rompía con KeyError: 'text' cuando el modelo decidía
+    # razonar, algo más probable cuanto más se le pide en el prompt que piense paso a paso). Acá
+    # juntamos todos los bloques de texto reales e ignoramos cualquier bloque de razonamiento.
+    text_blocks = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
+    if not text_blocks:
+        log.error("Anthropic no devolvió ningún bloque de texto: %s", json.dumps(data)[:500])
+        raise HTTPException(status_code=502, detail="Anthropic no devolvió texto (solo razonamiento?) — probá de nuevo")
+    return "\n".join(text_blocks).strip()
 
 
 def _extract_json(text: str) -> dict:
