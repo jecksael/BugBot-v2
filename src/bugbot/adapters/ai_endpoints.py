@@ -256,6 +256,12 @@ CALIFICAR_SYSTEM = (
     "marcar true algo que el texto no sostiene, que dejar una casilla en false por falta de "
     "información. En una nota corta típica, la MAYORÍA de las 16 afirmaciones van a quedar en "
     "false — eso es lo normal y lo esperado, no un error tuyo.\n\n"
+    "IMPORTANTE — esto NO es un ejercicio de \"hacer quedar bien\" al prospecto ni de venderle algo "
+    "a Dionar: es una herramienta de FILTRADO real. Si marcás cosas en true sin evidencia, Dionar "
+    "pierde tiempo real contactando a alguien que en realidad no calificaba. Marcar en false algo "
+    "que no se puede confirmar NO es un fallo tuyo ni un juicio negativo sobre la persona — es "
+    "simplemente honestidad con la información disponible. No asumas un perfil positivo genérico "
+    "solo porque el texto describe a alguien de forma cercana o simpática.\n\n"
     "Definiciones para evitar ambigüedad:\n"
     "- Edad +25: el texto da una edad explícita de 25 años o más.\n"
     "- Casado: está CASADO Y CONVIVE actualmente con su pareja. Si el texto dice separado, "
@@ -311,6 +317,10 @@ async def calificar_l100(payload: dict, x_ai_token: str | None = Header(default=
         raise HTTPException(status_code=422, detail="falta 'nota'")
 
     texto = await call_llm(CALIFICAR_SYSTEM, nota, max_tokens=900, temperature=0.2)
+    # log temporal de diagnóstico: nos deja ver el análisis + JSON crudo del modelo en los logs de
+    # Railway para diagnosticar la calibración (ver [[trading_module_ia_prospeccion_backend_2026-09-10]]
+    # en la memoria del proyecto — sacarlo una vez que la calibración esté confirmada estable).
+    log.info("calificar-l100 | nota=%r | respuesta cruda del modelo:\n%s", nota[:200], texto)
     try:
         data = _extract_json(texto)
     except Exception:
