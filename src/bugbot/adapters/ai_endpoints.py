@@ -332,3 +332,106 @@ async def calificar_l100(payload: dict, x_ai_token: str | None = Header(default=
     biz = {q: bool(data.get("biz", {}).get(q, False)) for q in L100_BIZ}
     trig = {q: bool(data.get("trig", {}).get(q, False)) for q in L100_TRIG}
     return {"core": core, "biz": biz, "trig": trig}
+
+
+# ───────────────────────── /ai/draft-slides ─────────────────────────
+# Genera el texto de cada slide de una publicación (Historia = 1 slide, Carrusel = varias),
+# a partir de los datos ya cargados en el modal de Publicaciones (título/guion/copy). El
+# frontend renderiza el texto devuelto sobre un canvas con los colores de la marca — acá
+# solo se redacta el contenido, nunca se genera ni se sube ninguna imagen real.
+
+_MARCA_PERSONAS = {
+    "HGI": (
+        "Sos un redactor de contenido para Instagram sobre seguros de vida IUL (marca HGI/Integrity). "
+        "Tono cercano y educativo, sin sonar a vendedor agresivo, sin inventar cifras de rendimiento "
+        "ni promesas que no te dieron. Podés hablar en términos generales del producto (protección "
+        "familiar, ahorro con ventajas fiscales, acceso a fondos en vida) pero nunca cifras específicas "
+        "que no estén en los datos que te pasan."
+    ),
+    "Trading": (
+        "Sos un redactor de contenido para Instagram sobre trading de futuros (marca Trading/Dionar G "
+        "Trader). Tono de operador serio y transparente, nunca promesas de rendimiento garantizado ni "
+        "'hazte rico rápido' — mostrás el proceso real (disciplina, gestión de riesgo, journaling), no "
+        "resultados irreales."
+    ),
+    "WifiMoney": (
+        "Sos un redactor de contenido para Instagram sobre generar ingresos remotos/online y estilo de "
+        "vida (marca WifiMoney). Tono motivacional pero honesto, sin promesas de dinero fácil ni "
+        "esquemas — enfocado en mentalidad, hábitos y pasos reales."
+    ),
+}
+
+
+def _persona_for(marca: str) -> str:
+    return _MARCA_PERSONAS.get(marca, _MARCA_PERSONAS["HGI"])
+
+
+def _formato_instrucciones(formato: str) -> str:
+    if formato == "Historia":
+        return "Es UNA sola slide (historia de Instagram) — un mensaje directo y potente, no una serie."
+    return (
+        "Es un CARRUSEL de Instagram: generá entre 5 y 8 slides. La primera slide es la portada/gancho "
+        "(usá el título tal cual o una versión mejorada). Las del medio desarrollan la idea, un punto "
+        "por slide. La última es un cierre con una idea final o invitación suave a seguir la cuenta o "
+        "escribir (sin sonar a venta dura)."
+    )
+
+
+DRAFT_SLIDES_SYSTEM_TMPL = (
+    "{persona}\n\n"
+    "Te van a dar el título/gancho, un guion o puntos clave, y opcionalmente un copy ya escrito de una "
+    "publicación. Tu trabajo es transformar eso en el texto de cada slide de una publicación de "
+    "Instagram, listo para poner sobre una imagen (nada de emojis en exceso, nada de hashtags, nada de "
+    "menciones a 'slide' o 'swipe').\n\n"
+    "Formato pedido: {formato}.\n"
+    "{formato_instrucciones}\n\n"
+    'Respondé ÚNICAMENTE un JSON (sin backticks, sin texto alrededor) con esta forma exacta:\n'
+    '{{"slides": [{{"titulo": "...", "texto": "..."}}, ...]}}\n'
+    "Cada 'titulo' es corto (máximo 8 palabras, como un titular). Cada 'texto' es el cuerpo de esa "
+    "slide (máximo 3 líneas cortas, nada de párrafos largos — es texto que va ENCIMA de una imagen, "
+    "tiene que leerse en 2 segundos)."
+)
+
+
+@router.post("/draft-slides")
+async def draft_slides(payload: dict, x_ai_token: str | None = Header(default=None, alias="X-AI-Token")):
+    _check_token(x_ai_token)
+    marca = str(payload.get("marca", "")).strip() or "HGI"
+    formato = str(payload.get("formato", "")).strip() or "Carrusel"
+    titulo = str(payload.get("titulo", "")).strip()
+    guion = str(payload.get("guion", "")).strip()
+    copy = str(payload.get("copy", "")).strip()
+    if not titulo and not guion and not copy:
+        raise HTTPException(status_code=422, detail="falta título, guion o copy para generar las slides")
+
+    system = DRAFT_SLIDES_SYSTEM_TMPL.format(
+        persona=_persona_for(marca),
+        formato=formato,
+        formato_instrucciones=_formato_instrucciones(formato),
+    )
+    user_prompt = (
+        f"Marca: {marca}\n"
+        f"Formato: {formato}\n"
+        f"Título / gancho: {titulo or '(sin título)'}\n"
+        f"Guion / puntos clave:\n{guion or '(sin guion)'}\n\n"
+        f"Copy ya escrito (si existe, úsalo como referencia de tono/contenido, no lo repitas literal):\n"
+        f"{copy or '(sin copy previo)'}"
+    )
+
+    texto = await call_llm(system, user_prompt, max_tokens=1200, temperature=0.85)
+    try:
+        data = _extract_json(texto)
+    except Exception:
+        log.error("draft-slides: respuesta no-JSON del modelo: %s", texto[:300])
+        raise HTTPException(status_code=502, detail="el modelo no devolvió JSON válido, probá de nuevo")
+
+    slides_raw = data.get("slides") or []
+    slides = []
+    for s in slides_raw[:10]:
+        t = str(s.get("titulo", "")).strip()
+        b = str(s.get("texto", "")).strip()
+        if t or b:
+            slides.append({"titulo": t, "texto": b})
+    if not slides:
+        raise HTTPException(status_code=502, detail="el modelo no devolvió ninguna slide, probá de nuevo")
+    return {"slides": slides}
