@@ -5,22 +5,85 @@ Registra cada señal para análisis estadístico posterior
 """
 from __future__ import annotations
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 JOURNAL_PATH = Path("data/journal.json")
+log = logging.getLogger("bugbot.journal")
 
 def _load() -> list:
+    """
+    Lee el journal. Nunca debe poder tumbar al proceso que la llama —
+    webhook.py depende de esto para cada señal en vivo. Si el archivo
+    está corrupto, se intenta recuperar y, si no se puede, se respalda
+    y se reinicia vacío en vez de crashear.
+
+    Incidente 2026-09-18: un journal.json con un carácter de control
+    crudo dentro de un string (json.decoder.JSONDecodeError: Invalid
+    control character) tumbó CADA request al webhook durante horas,
+    porque log_signal() se llamaba antes de mandar el mensaje a
+    Telegram y esta función no atrapaba el error. Ver también el
+    reordenamiento en webhook.py (Telegram antes que journal).
+    """
     if not JOURNAL_PATH.exists():
         return []
-    with open(JOURNAL_PATH, "r") as f:
-        return json.load(f)
+
+    raw = JOURNAL_PATH.read_text()
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Caracteres de control sueltos dentro de un string (la causa real del
+    # incidente de hoy) — strict=False los tolera sin tocar el archivo.
+    # Esto solo debería hacer falta una vez: la próxima _save() reescribe
+    # el archivo limpio.
+    try:
+        entries = json.loads(raw, strict=False)
+        log.warning(
+            "journal.json tenía caracteres de control inválidos; "
+            "recuperado con strict=False. Revisar la entrada más reciente "
+            "por datos raros (ej. un campo con un salto de línea crudo)."
+        )
+        return entries
+    except json.JSONDecodeError:
+        pass
+
+    # Irrecuperable (ej. archivo truncado a la mitad de una escritura no
+    # atómica). Se respalda para inspección manual y se sigue con el
+    # journal vacío — perder historial es preferible a tumbar la señal
+    # en vivo.
+    backup = JOURNAL_PATH.with_name(
+        f"journal.corrupt-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    )
+    try:
+        JOURNAL_PATH.rename(backup)
+        log.error(
+            "journal.json corrupto e irrecuperable — respaldado en %s, "
+            "reiniciado vacío", backup
+        )
+    except Exception:
+        log.exception("journal.json corrupto e irrecuperable, y no se pudo respaldar")
+    return []
 
 def _save(entries: list) -> None:
-    JOURNAL_PATH.parent.mkdir(exist_ok=True)
-    with open(JOURNAL_PATH, "w") as f:
+    """
+    Escritura atómica: se escribe a un archivo temporal y se reemplaza
+    con os.replace() (atómico en POSIX). Así, si el proceso muere a
+    mitad de la escritura (deploy, OOM, crash), journal.json nunca
+    queda a medias — esa es la causa más probable del incidente de hoy:
+    una escritura interrumpida dejó el archivo corrupto, y como _load()
+    crasheaba antes de llegar acá, nunca se pudo volver a sobrescribir
+    limpio.
+    """
+    JOURNAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = JOURNAL_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w") as f:
         json.dump(entries, f, indent=2)
+    os.replace(tmp_path, JOURNAL_PATH)
 
 def log_signal(
     symbol:      str,

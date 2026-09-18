@@ -11,8 +11,8 @@ Flujo:
     → valida token secreto
     → normaliza payload
     → Risk Engine (calculate_contracts)
-    → log_signal (journal)
-    → send_text (Telegram)
+    → send_text (Telegram)          ← PRIMERO. Ver nota del 2026-09-18 abajo.
+    → log_signal (journal)          ← envuelto en try/except, nunca bloquea la señal
     → (background, DESPUÉS de responder) Confluencias → update_confluences
 
 IMPORTANTE — timeout de TradingView: TradingView espera la respuesta del
@@ -21,6 +21,16 @@ que dependa de una descarga de red (velas para Order Block/FVG) se hace
 DESPUÉS de responder 200 OK, vía BackgroundTasks — nunca antes. El SL/TP
 dinámico con ATR (rama SMC) sigue siendo síncrono porque es indispensable
 para la señal misma, no una mejora aditiva.
+
+IMPORTANTE — orden Telegram vs. journal (fix 2026-09-18): un journal.json
+corrupto en disco tumbó el webhook completo durante horas porque log_signal()
+se llamaba ANTES de send_text() y sin try/except — una excepción ahí abajo
+mataba el request entero antes de que la señal real saliera a Telegram. La
+regla ahora es: la señal (Telegram) es lo único que no puede fallar en
+silencio; todo lo demás (journal, confluencias) es secundario y debe estar
+aislado para que un fallo ahí jamás bloquee la señal. Ver también el fix
+correspondiente en core/journal.py (_load()/_save() tolerantes a corrupción
+y escritura atómica).
 
 Arranque (dev):
     uvicorn bugbot.adapters.webhook:app --host 0.0.0.0 --port 8000
@@ -255,37 +265,51 @@ async def tradingview_webhook(request: Request, background_tasks: BackgroundTask
         send_text(f"⚠️ {symbol} {side} descartado — {risk.reason}")
         return {"status": "skipped", "reason": risk.reason}
 
-    # 5. Journal — SIN confluencias todavía (se completan en background).
+    # 5. Telegram — PRIMERO, y sin try/except: si esto falla es porque algo
+    #    está realmente roto (Telegram caído, token malo) y sí queremos
+    #    verlo. Pero nada de lo que viene DESPUÉS puede impedir que esto
+    #    se ejecute — ver nota del incidente 2026-09-18 al inicio del archivo.
     sig = {
         "side": side, "entry": entry, "sl": sl,
         "zona": zona, "bias": bias, "event": zona,
         "strategy": strategy,
     }
+    text = fmt_signal(symbol, sig, risk)
+    send_text(text, parse_mode="HTML")
+    log.info("%s | ✅ señal emitida vía webhook", symbol)
+
+    # 6. Journal — SIN confluencias todavía (se completan en background).
+    #    Envuelto en try/except a propósito: un journal.json corrupto o
+    #    cualquier otro fallo de disco NUNCA debe poder tumbar esta
+    #    respuesta — la señal ya salió por Telegram en el paso anterior.
     # Acceso seguro a los TP: algunos símbolos (ej. MES) tienen menos de 3.
     _tp = [lvl.price for lvl in risk.tp_levels]
     tp1 = _tp[0] if len(_tp) > 0 else None
     tp2 = _tp[1] if len(_tp) > 1 else None
     tp3 = _tp[2] if len(_tp) > 2 else None
-    record = log_signal(
-        symbol=symbol, side=side, entry=entry, sl=sl,
-        tp1=tp1, tp2=tp2, tp3=tp3,
-        risk_usd=risk.risk_dollars,
-        zona=zona, bias=bias,
-        session="TV",
-    )
-
-    # 6. Telegram — se manda YA, sin esperar confluencias.
-    text = fmt_signal(symbol, sig, risk)
-    send_text(text, parse_mode="HTML")
-    log.info("%s | ✅ señal emitida vía webhook", symbol)
+    signal_id = None
+    try:
+        record = log_signal(
+            symbol=symbol, side=side, entry=entry, sl=sl,
+            tp1=tp1, tp2=tp2, tp3=tp3,
+            risk_usd=risk.risk_dollars,
+            zona=zona, bias=bias,
+            session="TV",
+        )
+        signal_id = record["id"]
+    except Exception:
+        log.exception("%s | error guardando en journal (no crítico, la señal ya salió)", symbol)
 
     # 7. Confluencias en background — corre DESPUÉS de que FastAPI ya envió
     #    la respuesta HTTP. Así el tiempo de respuesta a TradingView queda
     #    igual que antes de este feature (nunca arriesga un timeout).
-    background_tasks.add_task(
-        _finish_confluences,
-        signal_id=record["id"], symbol=symbol, zona=zona, side=side,
-        timeframe=ATR_TIMEFRAME, df=df_for_confluences,
-    )
+    #    Se salta si el journal falló arriba (no hay signal_id para anclar
+    #    las confluencias).
+    if signal_id is not None:
+        background_tasks.add_task(
+            _finish_confluences,
+            signal_id=signal_id, symbol=symbol, zona=zona, side=side,
+            timeframe=ATR_TIMEFRAME, df=df_for_confluences,
+        )
 
     return {"status": "ok", "symbol": symbol, "side": side}
